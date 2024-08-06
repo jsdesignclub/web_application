@@ -4,6 +4,7 @@ const bodyParser = require('body-parser');
 const cors = require('cors');
 const multer = require('multer');
 const path = require('path');
+const fs = require('fs');
 
 
 
@@ -15,19 +16,6 @@ const port = 5000;
 app.use(cors());
 app.use(bodyParser.json());
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
-
-// Configure multer for file uploads
-const storage = multer.diskStorage({
-  destination: (req, file, cb) => {
-    cb(null, 'uploads/');
-  },
-  filename: (req, file, cb) => {
-    cb(null, Date.now() + '-' + file.originalname);
-  }
-});
-const upload = multer({ storage: storage });
-
-
 
 
 const db = mysql.createConnection({
@@ -263,6 +251,7 @@ app.put('/api/orders/:orderId', (req, res) => {
 // Add PremadeProduct
 app.post('/api/premadeproduct', (req, res) => {
   const { name,productId } = req.body;
+  
   const query = 'INSERT INTO premadeproduct (Name,ProductId) VALUES (?,?)';
   db.query(query, [name,productId], (err, results) => {
     if (err) {
@@ -291,21 +280,42 @@ app.post('/api/premadeproductdetails', (req, res) => {
 
 
 
-// Fetch details for a specific premade product
-app.get('/api/orders/:orderId', (req, res) => {
-  const orderId = parseInt(req.params.orderId);
-  const sql = 'SELECT * FROM order WHERE OrderId = ?';
+// Fetch details for a specific order
+app.get('/api/order/:orderId', (req, res) => {
+  const orderId = parseInt(req.params.orderId, 10);
+
+  if (isNaN(orderId)) {
+    return res.status(400).json({ message: 'Invalid Order ID' });
+  }
+
+  // Use backticks around `order`
+  const sql = `
+    SELECT 
+      o.OrderId,
+      c.CustomerName,
+      p.ProductName,
+      o.Quantity,
+      o.OrderDate,
+      o.DeliveryDate
+    FROM 
+      \`order\` o
+    INNER JOIN 
+      Customer c ON o.CustomerId = c.CustomerId
+    INNER JOIN 
+      Product p ON o.ProductId = p.ProductId
+    WHERE 
+      o.OrderId = ?
+  `;
 
   db.query(sql, [orderId], (err, results) => {
     if (err) {
-      console.error('Error fetching premade product details:', err);
-      res.status(500).json({ message: 'Error fetching premade product details' });
+      console.error('Error fetching order details:', err);
+      res.status(500).json({ message: 'Error fetching order details' });
     } else {
       res.json(results);
     }
   });
 });
-
 
 app.get('/api/order_materials/:orderId', (req, res) => {
   const orderId = parseInt(req.params.orderId);
@@ -320,6 +330,102 @@ app.get('/api/order_materials/:orderId', (req, res) => {
     }
   });
 });
+
+// Set up multer for file uploads
+const storage = multer.diskStorage({
+  destination: (req, file, cb) => {
+    cb(null, 'uploads/');
+  },
+  filename: (req, file, cb) => {
+    cb(null, `${Date.now()}-${file.originalname}`);
+  }
+});
+const upload = multer({ storage: storage });
+
+
+//Image upload
+app.post('/api/upload', upload.single('image'), (req, res) => {
+  const imageUrl = `http://localhost:5000/uploads/${req.file.filename}`;
+  const premadeProductId = parseInt(req.body.premadeProductId, 10);
+
+  if (isNaN(premadeProductId)) {
+    return res.status(400).json({ message: 'Invalid Premade Product ID' });
+  }
+
+  const query = 'INSERT INTO images (ImageUrl, PremadeProductId) VALUES (?, ?)';
+  db.query(query, [imageUrl, premadeProductId], (err, results) => {
+    if (err) {
+      console.error('Error saving image:', err);
+      res.status(500).send('Server error');
+    } else {
+      res.json({ imageUrl });
+    }
+  });
+});
+//remove image
+
+app.post('/api/remove-image', (req, res) => {
+  const { imageUrl } = req.body;
+  const imagePath = path.join(__dirname, 'uploads', path.basename(imageUrl));
+
+  fs.unlink(imagePath, (err) => {
+    if (err) {
+      console.error('Error removing image:', err);
+      res.status(500).send('Server error');
+    } else {
+      // Optionally, remove the image record from the database
+      const query = 'DELETE FROM images WHERE ImageUrl = ?';
+      db.query(query, [imageUrl], (err, results) => {
+        if (err) {
+          console.error('Error deleting image record:', err);
+          res.status(500).send('Server error');
+        } else {
+          res.json({ message: 'Image removed successfully' });
+        }
+      });
+    }
+  });
+});
+
+// Serve static files
+app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
+
+app.get('/api/order-details/:premadeProductId', (req, res) => {
+  const orderId = parseInt(req.params.orderId, 10);
+
+  // Validate that premadeProductId is a valid number
+  if (isNaN(orderId)) {
+    return res.status(400).json({ message: 'Invalid PremadeProductId' });
+  }
+
+  const sql = `SELECT * FROM order WHERE orderId = ?`;
+
+  db.query(sql, [orderId], (err, results) => {
+    if (err) {
+      console.error('Error fetching order details:', err);
+      res.status(500).json({ message: 'Error fetching order details' });
+    } else {
+      res.json(results);
+    }
+  });
+});
+
+
+app.get('/api/images/:premadeProductId', (req, res) => {
+  const { premadeProductId } = req.params;
+  const query = 'SELECT * FROM images WHERE PremadeProductId = ?';
+  db.query(query, [premadeProductId], (err, results) => {
+    if (err) {
+      console.error('Error fetching images:', err);
+      return res.status(500).send('Server error');
+    } else {
+      return res.json(results);
+    }
+  });
+})
+
+
+
 
 
 
