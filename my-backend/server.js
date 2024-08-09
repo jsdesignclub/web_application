@@ -212,6 +212,23 @@ app.get('/api/premade_product_details/:id', (req, res) => {
   });
 });
 
+app.get('/api/premadeproductdetails/:premadeProductId', (req, res) => {
+  const premadeProductId = parseInt(req.params.premadeProductId);
+  console.log('Received premadeProductId:', premadeProductId); // Log the received parameter
+
+  const sql = 'SELECT * FROM premadeproductdetails WHERE PremadeProductId = ?';
+  console.log('Executing query:', sql, [premadeProductId]); // Log the full query
+  db.query(sql, [premadeProductId], (err, results) => {
+    if (err) {
+      console.error('Error fetching product details:', err);
+      res.status(500).json({ message: 'Error fetching product details' });
+    } else {
+      console.log('Fetched Product Details:', results); // Log the fetched details
+      res.json(results);
+    }
+  });
+});
+
 
 
 // API endpoint to get all materials
@@ -222,7 +239,8 @@ app.get('/api/materials', (req, res) => {
       console.error('Error fetching materials:', err);
       res.status(500).json({ message: 'Error fetching materials' });
     } else {
-      res.status(200).json(results);
+      //console.log('Fetched Materials:', results); // Add this line to log the fetched materials
+      res.json(results);
     }
   });
 });
@@ -231,14 +249,14 @@ app.get('/api/materials', (req, res) => {
 // API endpoint to update an existing order with a selected PremadeProductId
 app.put('/api/orders/:orderId', (req, res) => {
   const { orderId } = req.params;
-  const { PremadeProductId } = req.body;
+  const { premadeProductId } = req.body;
 
-  if (!orderId || !PremadeProductId) {
+  if (!orderId || !premadeProductId) {
     return res.status(400).json({ message: 'orderId and PremadeProductId are required' });
   }
 
-  const sql = 'UPDATE `order` SET PremadeProductId = ? WHERE OrderId = ?';
-  db.query(sql, [PremadeProductId, orderId], (err, results) => {
+  const sql = 'UPDATE `order` SET PremadeProductId = ?, Action = "Stock Department" WHERE OrderId = ?';
+  db.query(sql, [premadeProductId, orderId], (err, results) => {
     if (err) {
       console.error('Error updating order:', err);
       return res.status(500).json({ message: 'Error updating order' });
@@ -247,6 +265,7 @@ app.put('/api/orders/:orderId', (req, res) => {
     }
   });
 });
+
 
 // Add PremadeProduct
 app.post('/api/premadeproduct', (req, res) => {
@@ -423,7 +442,124 @@ app.get('/api/images/:premadeProductId', (req, res) => {
     }
   });
 })
+// Delete material requirement
+app.delete('/api/premadeproductdetails/:id', (req, res) => {
+  const { id } = req.params;
 
+  const sql = 'DELETE FROM premadeproductdetails WHERE ProductSpecificationId = ?';
+  db.query(sql, [id], (err, results) => {
+    if (err) {
+      console.error('Error deleting material requirement:', err);
+      return res.status(500).json({ message: 'Error deleting material requirement' });
+    } else {
+      return res.status(200).json({ message: 'Material requirement deleted successfully' });
+    }
+  });
+})
+
+// Fetch orders where action is 'Stock Department'
+app.get('/api/orders/stock-department', (req, res) => {
+  const sql = 'SELECT * FROM `order` WHERE Action = "Stock Department"';
+  db.query(sql, (err, results) => {
+    if (err) {
+      console.error('Error fetching orders:', err);
+      res.status(500).json({ message: 'Error fetching orders' });
+    } else {
+      res.json(results);
+    }
+  });
+});
+
+// Backend endpoint to fetch material details for a specific order
+app.get('/api/material_details/:orderId', (req, res) => {
+  const { orderId } = req.params;
+  console.log(orderId);
+  const sql = `
+    SELECT m.MaterialName, pd.MaterialId,pd.Quantity, pd.UnitPrice, (pd.Quantity * pd.UnitPrice) AS TotalPrice
+    FROM PremadeProductDetails pd
+    JOIN Material m ON pd.MaterialId = m.MaterialId
+    WHERE pd.PremadeProductId = ?;
+  `;
+
+  db.query(sql, [orderId], (err, results) => {
+    if (err) {
+      console.error('Error fetching material details:', err);
+      res.status(500).json({ message: 'Error fetching material details' });
+    } else {
+      res.json(results);
+      console.log(results);
+    }
+  });
+});
+
+// API endpoint to update the action field of an order
+app.put('/api/orders/:PremadeProductId/action', (req, res) => {
+  const { PremadeProductId } = req.params;
+  const { action } = req.body;
+console.log(PremadeProductId);
+console.log(action);
+  if (!PremadeProductId || !action) {
+      return res.status(400).json({ message: 'Order ID and action are required' });
+  }
+
+  const sql = 'UPDATE `order` SET Action = ? WHERE OrderId = ?';
+  db.query(sql, ['cutting department', PremadeProductId], (err, results) => {
+      if (err) {
+          console.error('Error updating order action:', err);
+          return res.status(500).json({ message: 'Error updating order action' });
+      } else {
+          return res.status(200).json({ message: 'Order action updated successfully' });
+      }
+  });
+});
+
+// API endpoint to update stock levels
+app.put('/api/stock/:MaterialId', (req, res) => {
+  const materialId = req.params.MaterialId; // Change to match the case used in the route
+  const { issuedQuantity } = req.body;
+
+  console.log('Issued Quantity:', issuedQuantity);
+  console.log('MaterialId:', materialId);
+
+  const sql = 'UPDATE stock SET AvailableQuantity = AvailableQuantity - ?, LastUpdated = NOW() WHERE MaterialId = ?';
+  db.query(sql, [issuedQuantity, materialId], (err, results) => { // Also update here
+    if (err) {
+      console.error('Error updating stock:', err);
+      return res.status(500).json({ message: 'Error updating stock' });
+    }
+    res.status(200).json({ message: 'Stock updated successfully' });
+  });
+});
+
+
+
+// API endpoint to update material records
+app.put('/api/material/:materialId', (req, res) => {
+  const materialId = req.params.materialId;
+  const { issuedQuantity } = req.body;
+
+  const sql = 'UPDATE material SET Quantity = Quantity - ? WHERE MaterialId = ?';
+  db.query(sql, [issuedQuantity, materialId], (err, results) => {
+    if (err) {
+      console.error('Error updating material:', err);
+      return res.status(500).json({ message: 'Error updating material' });
+    }
+    res.status(200).json({ message: 'Material updated successfully' });
+  });
+});
+
+// API endpoint to get all stock details
+app.get('/api/stock', (req, res) => {
+  const sql = 'SELECT * FROM stock';
+  db.query(sql, (err, results) => {
+    if (err) {
+      console.error('Error fetching stock details:', err);
+      res.status(500).json({ message: 'Error fetching stock details' });
+    } else {
+      res.json(results);
+    }
+  });
+});
 
 
 
